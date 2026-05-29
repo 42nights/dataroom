@@ -9,6 +9,7 @@ import { markdownChunker } from "./chunker";
 import { sha256OfBuffer } from "./hash";
 import { PROMPT_VERSION } from "./prompts";
 import { audit } from "./audit";
+import { runCompliancePass } from "./compliance";
 
 export type IngestResult =
   | { ok: true; documentId: number; deduped: boolean }
@@ -90,6 +91,21 @@ export async function ingestFile(args: {
     const chunks = markdownChunker(scrubbed);
     if (!chunks.length) throw new Error("Chunker produced no chunks");
 
+    // Compliance pass: between scrub and chunk-store. Regex + cached LLM pass,
+    // writes the document_compliance row; chunks inherit doc labels/severity.
+    const compliance = await runCompliancePass({
+      documentId: docId,
+      contentHash: hash,
+      scrubbed,
+      chunkTexts: chunks.map((c) => c.text),
+    });
+    if (compliance.severity !== "clean") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[ingest] ${args.originalFilename}: compliance ${compliance.severity} (${compliance.labels.join(",")})`,
+      );
+    }
+
     db.prepare(
       `UPDATE documents
        SET status='embedding', parser_used=?, parsed_markdown_preview=?, updated_at=?
@@ -102,11 +118,14 @@ export async function ingestFile(args: {
       const vectors = await embedBatch(batch.map((c) => c.text));
       const tx = db.transaction(() => {
         for (let j = 0; j < batch.length; j++) {
+          const cc = compliance.chunkCompliance[cIdx];
           insertChunk({
             documentId: docId,
             chunkIndex: cIdx,
             text: batch[j].text,
             embedding: vectors[j],
+            complianceLabels: cc?.labels,
+            complianceSeverity: cc?.severity,
           });
           cIdx++;
         }

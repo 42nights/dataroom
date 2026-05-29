@@ -51,11 +51,15 @@ export function insertChunk(args: {
   text: string;
   embedding: Float32Array;
   tokenCount?: number;
+  complianceLabels?: string[];
+  complianceSeverity?: string;
 }): number {
   const info = db
     .prepare(
-      `INSERT INTO chunks (document_id, chunk_index, text, token_count, embedding)
-       VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO chunks
+       (document_id, chunk_index, text, token_count, embedding,
+        compliance_labels_json, compliance_severity)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       args.documentId,
@@ -63,6 +67,8 @@ export function insertChunk(args: {
       args.text,
       args.tokenCount ?? null,
       vecToBuf(args.embedding),
+      args.complianceLabels ? JSON.stringify(args.complianceLabels) : null,
+      args.complianceSeverity ?? null,
     );
   const id = Number(info.lastInsertRowid);
   getIndex().set(id, args.embedding);

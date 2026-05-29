@@ -67,3 +67,35 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
+
+-- Compliance addendum (v0.2) -------------------------------------------------
+
+CREATE TABLE IF NOT EXISTS document_compliance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  labels_json TEXT NOT NULL,            -- JSON array: ["phi","pii"]
+  highest_severity TEXT NOT NULL,       -- 'block' | 'warn' | 'clean'
+  findings_json TEXT NOT NULL,          -- detailed per-finding records
+  regex_pass_version TEXT NOT NULL,
+  llm_pass_version TEXT,                 -- null if LLM pass was skipped
+  llm_pass_model TEXT,
+  scanned_at INTEGER NOT NULL,
+  UNIQUE(document_id, regex_pass_version, llm_pass_version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_dc_doc ON document_compliance(document_id);
+CREATE INDEX IF NOT EXISTS idx_dc_sev ON document_compliance(highest_severity);
+
+-- LLM-pass result cache, keyed by content so an unchanged doc never re-pays
+-- for the semantic pass (even across documents that share identical content).
+CREATE TABLE IF NOT EXISTS compliance_llm_cache (
+  content_hash TEXT NOT NULL,
+  prompt_version TEXT NOT NULL,
+  model TEXT NOT NULL,
+  findings_json TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (content_hash, prompt_version, model)
+);
+
+-- chunks.compliance_labels_json / compliance_severity are added by migrate.ts
+-- via ALTER TABLE (SQLite has no idempotent ADD COLUMN inside this file).
